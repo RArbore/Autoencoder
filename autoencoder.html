@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.0.0/dist/tf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/5.9.0/math.js"></script>
+  <title>Document</title>
+</head>
+<body>
+  <input type="file" id="fileinput1"/>
+  <input type="file" id="fileinput2"/>
+  <div style="background:blue" onclick="fileStuff()">
+  	start
+  </div>
+  <div id="container" style="width:100%;display:flex;flex-flow:column nowrap;align-items:center">
+  </div>
+  <script>
+
+  	var steps = 0;
+  	
+  	function fileStuff() {
+  		let fileinput1 = document.getElementById("fileinput1");
+  		let fileinput2 = document.getElementById("fileinput2");
+
+		let file1 = fileinput1.files[0];
+  		let file2 = fileinput2.files[0];
+  		let reader1 = new FileReader();
+  		reader1.onload = function (e) {
+  			let reader2 = new FileReader();
+	  		reader2.onload = function (e) {
+	  			run(reader1.result, reader2.result);
+	  		}
+	  		reader2.readAsArrayBuffer(file1);
+  		}
+  		reader1.readAsArrayBuffer(file1);
+  	}
+
+  	function createCanvas(bottledvals) {
+  		let canvas = document.createElement('canvas'),
+    	ctx = canvas.getContext('2d');
+    	canvas.width = 320;
+		canvas.height = 200;
+		canvas.style.width = "320px";
+		canvas.style.height = "200px";
+		let idata = ctx.createImageData(320, 200);
+		let buffer = new Uint8ClampedArray(320*200*4);
+		for(let y = 0; y < 10; y++) {
+		    for(let x = 0; x < 16; x++) {
+		        let valspos = (y * 16 + x);
+		        let value = bottledvals[valspos]*256.0;
+		        //let value = x*8+y*8;
+		        for (let sy = 0; sy < 20; sy++) {
+		        	for (let sx = 0; sx < 20; sx++) {
+		        		let buffpos = (sx+sy*320+x*20+y*20*320)*4;
+		        		buffer[buffpos] = value;
+				        buffer[buffpos+1] = value;
+				        buffer[buffpos+2] = value;
+				        buffer[buffpos+3] = 255;
+		        	}
+		        }
+		    }
+		}
+		idata.data.set(buffer);
+		ctx.putImageData(idata, 0, 0);
+		document.getElementById("container").appendChild(canvas);
+		console.log("DRAWN");
+  	}
+
+  	function run(read1a, read2a) {
+  		let read1 = new Uint8Array(read1a);
+  		let read2 = new Uint8Array(read2a);
+
+  		console.log(read1);
+
+		const width = 28, height = 28;
+
+		let matchedlabels = new Map();
+
+		let reader = new FileReader();
+
+
+		let trainingdata = read1;
+		let traininglabels = read2;
+
+		let imageindex = 0;
+		let labelindex = 0;
+		while (imageindex+16 < trainingdata.length) {
+		  let frameData = [];
+		  let frameindex = 0;
+		  let dataindex = 0;
+		  while (frameindex < width*height) {
+		    frameData.push(parseFloat(trainingdata[16+(dataindex++)+imageindex])/256);
+		    frameindex++;
+		  }
+		  let labelnum = traininglabels[labelindex+8];
+		  matchedlabels.set([...frameData], labelnum);
+		  //console.log(imageindex/width/height, labelnum, (imageindex/(trainingdata.length-16)*100+"").substring(0, 5)+"%");
+		  imageindex += width*height;
+		  labelindex++;
+		}
+
+		let images = [];
+
+		let timages = [];
+
+		let count = 0;
+
+		for (let [image, value] of matchedlabels) {
+		  if (count < 20000) {
+		    images.push(image);
+		  }
+		  else if (count < 20010) {
+		    timages.push(image);
+		  }
+		  count++;
+		}
+
+		let bottleneck;
+
+		const model = tf.sequential();
+		const layersizes = [784, 256, 64, 16, 4, 16, 64, 256, 784];
+		for (let i = 1; i < layersizes.length; i++) {
+		  let layer = tf.layers.dense({
+		    units: layersizes[i],
+		    inputShape: [layersizes[i-1]],
+		    activation: 'sigmoid'
+		  });
+			model.add(layer);
+		  if (i == math.ceil(layersizes.length/2)) {
+		    bottleneck = layer;
+		  }
+		}
+		const sgdOpt = tf.train.rmsprop(0.01);
+		model.compile({
+		  optimizer: sgdOpt,
+		  loss: tf.losses.meanSquaredError
+		});
+
+		//console.log(model.layers);
+
+		console.log("1");
+		const xs = tf.tensor2d(images);
+		const txs = tf.tensor2d(timages);
+		console.log("2");
+
+		train(xs, model).then(async () => {
+			let outputs = model.predict(txs);
+			console.log("BREAK");
+			let layers = model.layers;
+			let bottlevals = applyRange(txs, layers, 0, 4);
+			let afterbottle = applyRange(bottlevals, layers, 4, 8);
+			let error = tf.div(tf.sum(tf.squaredDifference(afterbottle, txs)), tf.scalar(txs.size));
+			error.print();
+			bottlevals.print();
+			let bottledvals = bottlevals.dataSync();
+			createCanvas(bottledvals);
+		});
+	}
+
+	async function train(xs, model) {
+	  let recentcost;
+	  while (steps < 50) {
+	  
+	    const config = {
+	      shuffle: true,
+	      epochs: 1,
+	      batchSize: 250
+	    }
+	  
+	    const response = await model.fit(xs, xs, config);
+	  
+	    recentcost = response.history.loss[0];
+	    console.log(recentcost);
+	    steps++;
+	  }
+	  await model.save('downloads://ABS');
+	}
+
+	function applyRange(input, layers, low, high) {
+	    let copy = tf.clone(input);
+	    for (let i = low; i < high; i++) {
+	      copy = layers[i].apply(copy);
+	    }
+	    return copy;
+	}
+
+</script>
+</body>
+</html>

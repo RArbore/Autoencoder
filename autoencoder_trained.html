@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.0.0/dist/tf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/5.9.0/math.js"></script>
+  <title>Document</title>
+</head>
+<body>
+  <input type="file" id="fileinput1"/>
+  <input type="file" id="fileinput2"/>
+  <input type="file" id="fileinput3"/>
+  <input type="file" id="fileinput4"/>
+  <div style="background:blue" onclick="fileStuff()">
+  	start
+  </div>
+  <div style="background:green" onclick="addFullRow()">
+  	add row
+  </div>
+  <div style="background:red">
+  	<div style="background:yellow" onclick="addSmallRow()">
+  		test bottleneck
+  	</div>
+  	<input type="string" id="num1"/>
+  	<input type="string" id="num2"/>
+  	<input type="string" id="num3"/>
+  	<input type="string" id="num4"/>
+  </div>
+  <div id="container" style="width:100%;display:flex;flex-flow:column nowrap;align-items:center">
+  </div>
+  <script>
+
+  	var gmodel = null;
+  	var inputdata = null;
+  	var xs = null;
+  	var layers = null;
+  	var bottlesync = null;
+  	var aftersync = null;
+
+  	var size = 5;
+  	
+  	function fileStuff() {
+  		let fileinput1 = document.getElementById("fileinput1");
+  		let fileinput2 = document.getElementById("fileinput2");
+  		let fileinput3 = document.getElementById("fileinput3");
+  		let fileinput4 = document.getElementById("fileinput4");
+
+		let file1 = fileinput1.files[0];
+  		let file2 = fileinput2.files[0];
+  		let reader1 = new FileReader();
+  		reader1.onload = function (e) {
+  			let reader2 = new FileReader();
+	  		reader2.onload = function (e) {
+	  			run(reader1.result, reader2.result);
+	  		}
+	  		reader2.readAsArrayBuffer(file1);
+  		}
+  		reader1.readAsArrayBuffer(file1);
+  	}
+
+  	function createCanvas(input, width, height) {
+  		let canvas = document.createElement('canvas'),
+    	ctx = canvas.getContext('2d');
+    	canvas.width = width*20;
+		canvas.height = height*20;
+		canvas.style.width = canvas.width+"px";
+		canvas.style.height = canvas.height+"px";
+		let idata = ctx.createImageData(canvas.width, canvas.height);
+		let buffer = new Uint8ClampedArray(canvas.width*canvas.height*4);
+		for(let y = 0; y < height; y++) {
+		    for(let x = 0; x < width; x++) {
+		        let valspos = (y * width + x);
+		        let value = input[valspos]*256.0;
+		        for (let sy = 0; sy < 20; sy++) {
+		        	for (let sx = 0; sx < 20; sx++) {
+		        		let buffpos = (sx+sy*canvas.width+x*20+y*20*canvas.width)*4;
+		        		buffer[buffpos] = value;
+				        buffer[buffpos+1] = value;
+				        buffer[buffpos+2] = value;
+				        buffer[buffpos+3] = 255;
+		        	}
+		        }
+		    }
+		}
+		idata.data.set(buffer);
+		ctx.putImageData(idata, 0, 0);
+		return canvas;
+		// document.getElementById("container").appendChild(canvas);
+		// console.log("DRAWN");
+  	}
+
+  	async function run(read1a, read2a, read3a, read4a) {
+  		let read1 = new Uint8Array(read1a);
+  		let read2 = new Uint8Array(read2a);
+
+  		console.log(read1);
+
+		const width = 28, height = 28;
+
+		let matchedlabels = new Map();
+
+		let reader = new FileReader();
+
+
+		let trainingdata = read1;
+		let traininglabels = read2;
+
+		let imageindex = 0;
+		let labelindex = 0;
+		while (imageindex+16 < trainingdata.length) {
+		  let frameData = [];
+		  let frameindex = 0;
+		  let dataindex = 0;
+		  while (frameindex < width*height) {
+		    frameData.push(parseFloat(trainingdata[16+(dataindex++)+imageindex])/256);
+		    frameindex++;
+		  }
+		  let labelnum = traininglabels[labelindex+8];
+		  matchedlabels.set([...frameData], labelnum);
+		  //console.log(imageindex/width/height, labelnum, (imageindex/(trainingdata.length-16)*100+"").substring(0, 5)+"%");
+		  imageindex += width*height;
+		  labelindex++;
+		}
+
+		let images = [];
+
+
+		let count = 0;
+
+		for (let [image, value] of matchedlabels) {
+		  if (count < 100) {
+		    images.push(image);
+		  }
+		  count++;
+		}
+
+		let bottleneck;
+
+		const uploadJSONInput = document.getElementById('fileinput3');
+		const uploadWeightsInput = document.getElementById('fileinput4');
+		const model = await tf.loadLayersModel(tf.io.browserFiles(
+		[uploadJSONInput.files[0], uploadWeightsInput.files[0]]));
+
+		console.log("1");
+		xs = tf.tensor2d(images);
+		inputdata = xs.dataSync();
+		console.log("2");
+		layers = model.layers;
+		let bottlevals = applyRange(xs, layers, 0, Math.floor(size/2));
+		let afterbottle = applyRange(bottlevals, layers, Math.floor(size/2), 2*Math.floor(size/2));
+		bottlesync = bottlevals.dataSync();
+		aftersync = afterbottle.dataSync();
+		gmodel = model;
+		// let outputs = model.predict(txs);
+		// console.log("BREAK");
+		// let layers = model.layers;
+		// let bottlevals = applyRange(txs, layers, 0, 2);
+		// let afterbottle = applyRange(bottlevals, layers, 2, 4);
+		// let error = tf.div(tf.sum(tf.squaredDifference(afterbottle, txs)), tf.scalar(txs.size));
+		// error.print();
+		// bottlevals.print();
+		// let bottledvals = bottlevals.dataSync();
+		//createCanvas(bottledvals);
+	}
+
+	var rows = 0;
+
+	function addSmallRow() {
+		if (gmodel === null) return;
+		let newdiv = document.createElement('div');
+		newdiv.style.cssText = "background:LightGray;display:flex;flex-flow:row nowrap;padding:20px;align-items:center";
+		document.getElementById("container").appendChild(newdiv);
+		let num1 = document.getElementById("num1").value;
+		let num2 = document.getElementById("num2").value;
+		let num3 = document.getElementById("num3").value;
+		let num4 = document.getElementById("num4").value;
+		let output = createCanvas(applyRange(tf.tensor2d([parseFloat(num1), parseFloat(num2), parseFloat(num3), parseFloat(num4)], [1, 4]), layers, Math.floor(size/2), Math.floor(size/2)*2).dataSync(), 28, 28);
+		output.style.cssText = "padding-left:20px;padding-right:20px";
+		newdiv.appendChild(output);
+		rows++;
+	}
+
+	function addFullRow() {
+		if (gmodel === null) return;
+		let newdiv = document.createElement('div');
+		newdiv.style.cssText = "background:LightGray;display:flex;flex-flow:row nowrap;padding:20px;align-items:center";
+		document.getElementById("container").appendChild(newdiv);
+		let input = createCanvas(inputdata.slice(rows*784, (rows+1)*784), 28, 28);
+		let middle = createCanvas(bottlesync.slice(rows*4, (rows+1)*4), 2, 2);
+		console.log(bottlesync.slice(rows*4, (rows+1)*4));
+		let output = createCanvas(aftersync.slice(rows*784, (rows+1)*784), 28, 28);
+		middle.style.cssText = "padding-left:20px;padding-right:20px";
+		newdiv.appendChild(input);
+		newdiv.appendChild(middle);
+		newdiv.appendChild(output);
+		rows++;
+	}
+
+	async function train(xs, model) {
+	  let recentcost = 10;
+	  while (recentcost > 0.2) {
+	  
+	    const config = {
+	      shuffle: true,
+	      epochs: 1,
+	      verbose: false
+	    }
+	  
+	    const response = await model.fit(xs, xs, config);
+	  
+	    recentcost = response.history.loss[0];
+	    console.log(recentcost);
+	  }
+	}
+
+	function applyRange(input, layers, low, high) {
+	    let copy = tf.clone(input);
+	    for (let i = low; i < high; i++) {
+	      copy = layers[i].apply(copy);
+	    }
+	    return copy;
+	}
+
+</script>
+</body>
+</html>
