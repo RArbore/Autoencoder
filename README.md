@@ -1,2 +1,2 @@
 # Autoencoder
-Work w/ autoencoders
+Work autoencoderszzzzzzzzzz yay
