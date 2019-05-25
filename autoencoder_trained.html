@@ -39,7 +39,7 @@
   	var bottlesync = null;
   	var aftersync = null;
 
-  	var size = 5;
+  	var size = 9;
   	
   	function fileStuff() {
   		let fileinput1 = document.getElementById("fileinput1");
@@ -191,6 +191,7 @@
 		let middle = createCanvas(bottlesync.slice(rows*4, (rows+1)*4), 2, 2);
 		console.log(bottlesync.slice(rows*4, (rows+1)*4));
 		let output = createCanvas(aftersync.slice(rows*784, (rows+1)*784), 28, 28);
+		console.log(aftersync.slice(rows*784, (rows+1)*784));
 		middle.style.cssText = "padding-left:20px;padding-right:20px";
 		newdiv.appendChild(input);
 		newdiv.appendChild(middle);
